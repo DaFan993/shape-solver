@@ -66,11 +66,25 @@ canvas{display:block;max-width:100%;height:auto;cursor:crosshair;touch-action:no
   .pal{height:56px;font-size:30px}
   #grid{max-width:min(92vw,430px)}
 }
+
+.cornerDot{
+  position:absolute;width:18px;height:18px;border-radius:50%;
+  background:#ff4b4b;border:3px solid #fff;box-shadow:0 1px 5px #0006;
+  transform:translate(-50%,-50%);z-index:8;pointer-events:none;display:none;
+}
+.cornerPoly{
+  position:absolute;left:0;top:0;z-index:7;pointer-events:none;display:none;
+}
+.photoTools{
+  display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;
+}
+.photoTools button.active{background:#fff0f0;border-color:#ff7777;color:#9a2c2c}
+
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>图形数独截图求解器</h1><span style="display:inline-block;margin-left:8px;padding:4px 8px;border-radius:999px;background:#eef8f6;color:#0b615a;font-size:12px;font-weight:700">稳定回退版-1</span>
+  <h1>图形数独截图求解器</h1><span style="display:inline-block;margin-left:8px;padding:4px 8px;border-radius:999px;background:#eef8f6;color:#0b615a;font-size:12px;font-weight:700">稳定增强版-1</span><span style="display:inline-block;margin-left:8px;padding:4px 8px;border-radius:999px;background:#eef8f6;color:#0b615a;font-size:12px;font-weight:700">稳定回退版-1</span>
   <div class="muted">
     电脑：可直接 <b>Ctrl+V / ⌘V</b> 粘贴截图。粘贴后会优先<b>自动定位题盘、自动寻找“？”并求解</b>；无需手动画框。自动定位失败时仍可手动框选兜底。
   </div>
@@ -94,6 +108,8 @@ canvas{display:block;max-width:100%;height:auto;cursor:crosshair;touch-action:no
         </select>
       </label>
       <button id="recognize" class="primary">自动定位并求解</button>
+      <button id="cornerMode">四角校正</button>
+      <button id="restorePhoto">恢复原图</button>
       <button id="clear">重置题盘</button>
     </div>
 
@@ -102,12 +118,17 @@ canvas{display:block;max-width:100%;height:auto;cursor:crosshair;touch-action:no
         <div class="viewer" id="viewer">
           <canvas id="cv"></canvas>
           <div id="box" class="box"></div>
+          <canvas id="cornerPoly" class="cornerPoly"></canvas>
+          <div id="corner0" class="cornerDot"></div>
+          <div id="corner1" class="cornerDot"></div>
+          <div id="corner2" class="cornerDot"></div>
+          <div id="corner3" class="cornerDot"></div>
           <div id="emptyHint" class="muted" style="position:absolute;text-align:center;padding:20px">
             等待图片<br>电脑可直接粘贴截图
           </div>
         </div>
         <div class="muted" style="margin-top:7px">
-          通常无需操作：网页会自动找网格。若自动定位失败，可用鼠标/手指从题盘左上拖到右下手动框选。
+          通常无需操作：网页会先用增强后的边缘信息找淡网格。若拍照有透视畸变，点“四角校正”，依次点题盘四角，系统会拉正后再自动识别。
         </div>
       </div>
 
@@ -143,8 +164,15 @@ const cv=document.getElementById('cv'),ctx=cv.getContext('2d',{willReadFrequentl
 const viewer=document.getElementById('viewer'),box=document.getElementById('box'),emptyHint=document.getElementById('emptyHint');
 const grid=document.getElementById('grid'),pal=document.getElementById('palette'),ans=document.getElementById('ans'),note=document.getElementById('note');
 const pasteZone=document.getElementById('pasteZone');
+const cornerModeBtn=document.getElementById('cornerMode');
+const restorePhotoBtn=document.getElementById('restorePhoto');
+const cornerPoly=document.getElementById('cornerPoly');
+const cornerDots=[0,1,2,3].map(i=>document.getElementById('corner'+i));
 
 let img=null,sel=null,drag=false,start=null,n=5,cells=[],target=null,active=0;
+let originalCanvas=null;
+let cornerMode=false;
+let cornerPts=[];
 
 const S=[['circle','●'],['triangle','▲'],['star','★'],['square','■'],['plus','✚']];
 const E=-1,Q=-2;
@@ -216,6 +244,13 @@ function loadFile(file){
     cv.height=Math.max(1,Math.round(im.height*sc));
     ctx.clearRect(0,0,cv.width,cv.height);
     ctx.drawImage(im,0,0,cv.width,cv.height);
+
+    // Keep an untouched copy. Photo enhancement never changes the stable recognition path permanently.
+    originalCanvas=document.createElement('canvas');
+    originalCanvas.width=cv.width;originalCanvas.height=cv.height;
+    originalCanvas.getContext('2d').drawImage(cv,0,0);
+
+    cornerMode=false;cornerPts=[];cornerModeBtn.classList.remove('active');cornerModeBtn.textContent='四角校正';renderCorners();
     emptyHint.style.display='none';
     sel=null;showBox();
     ans.textContent='正在自动定位…';
@@ -262,6 +297,16 @@ function pt(e){
 }
 cv.onpointerdown=e=>{
   if(!img)return;
+  if(cornerMode){
+    const p=pt(e);
+    cornerPts.push(p);
+    if(cornerPts.length>4)cornerPts=[p];
+    renderCorners();
+    if(cornerPts.length===4){
+      setTimeout(()=>applyCornerWarp(),40);
+    }
+    return;
+  }
   drag=true;start=pt(e);cv.setPointerCapture(e.pointerId);
 }
 cv.onpointermove=e=>{
@@ -351,28 +396,209 @@ function progressionCandidates(profile,n){
   return unique;
 }
 
-function autoLocateGrid(){
-  if(!img||cv.width<80||cv.height<80)return false;
+
+function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
+
+function renderCorners(){
+  const cr=cv.getBoundingClientRect(),vr=viewer.getBoundingClientRect();
+  const sx=cr.width/(cv.width||1),sy=cr.height/(cv.height||1);
+
+  cornerDots.forEach((d,i)=>{
+    if(i<cornerPts.length){
+      const p=cornerPts[i];
+      d.style.display='block';
+      d.style.left=(cr.left-vr.left+p.x*sx)+'px';
+      d.style.top=(cr.top-vr.top+p.y*sy)+'px';
+    }else d.style.display='none';
+  });
+
+  cornerPoly.width=Math.max(1,Math.round(viewer.clientWidth*devicePixelRatio));
+  cornerPoly.height=Math.max(1,Math.round(viewer.clientHeight*devicePixelRatio));
+  cornerPoly.style.width=viewer.clientWidth+'px';
+  cornerPoly.style.height=viewer.clientHeight+'px';
+  const pc=cornerPoly.getContext('2d');
+  pc.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+  pc.clearRect(0,0,viewer.clientWidth,viewer.clientHeight);
+
+  if(cornerPts.length>=2){
+    cornerPoly.style.display='block';
+    pc.strokeStyle='#ff4b4b';pc.lineWidth=2;pc.setLineDash([7,5]);
+    pc.beginPath();
+    cornerPts.forEach((p,i)=>{
+      const x=cr.left-vr.left+p.x*sx,y=cr.top-vr.top+p.y*sy;
+      if(i===0)pc.moveTo(x,y);else pc.lineTo(x,y);
+    });
+    if(cornerPts.length===4)pc.closePath();
+    pc.stroke();pc.setLineDash([]);
+  }else cornerPoly.style.display='none';
+}
+
+window.addEventListener('resize',()=>{if(cornerPts.length)renderCorners()});
+
+function orderQuad(pts){
+  const a=[...pts];
+  // TL min sum, BR max sum, TR max x-y, BL min x-y
+  const tl=a.reduce((p,q)=>(q.x+q.y<p.x+p.y?q:p));
+  const br=a.reduce((p,q)=>(q.x+q.y>p.x+p.y?q:p));
+  const tr=a.reduce((p,q)=>(q.x-q.y>p.x-p.y?q:p));
+  const bl=a.reduce((p,q)=>(q.x-q.y<p.x-p.y?q:p));
+  return [tl,tr,br,bl];
+}
+
+function solveLinear(A,b){
+  const n=A.length;
+  const M=A.map((r,i)=>[...r,b[i]]);
+  for(let c=0;c<n;c++){
+    let p=c;
+    for(let r=c+1;r<n;r++)if(Math.abs(M[r][c])>Math.abs(M[p][c]))p=r;
+    if(Math.abs(M[p][c])<1e-9)return null;
+    [M[c],M[p]]=[M[p],M[c]];
+    const div=M[c][c];
+    for(let j=c;j<=n;j++)M[c][j]/=div;
+    for(let r=0;r<n;r++)if(r!==c){
+      const f=M[r][c];
+      for(let j=c;j<=n;j++)M[r][j]-=f*M[c][j];
+    }
+  }
+  return M.map(r=>r[n]);
+}
+
+// Homography from output square (u,v) -> source photo (x,y)
+function homographySquareToQuad(S,quad){
+  const dst=[[0,0],[S-1,0],[S-1,S-1],[0,S-1]];
+  const A=[],b=[];
+  for(let i=0;i<4;i++){
+    const [u,v]=dst[i],{x,y}=quad[i];
+    A.push([u,v,1,0,0,0,-x*u,-x*v]); b.push(x);
+    A.push([0,0,0,u,v,1,-y*u,-y*v]); b.push(y);
+  }
+  return solveLinear(A,b);
+}
+
+function bilinearSample(data,W,H,x,y,out,k){
+  x=clamp(x,0,W-1);y=clamp(y,0,H-1);
+  const x0=Math.floor(x),y0=Math.floor(y),x1=Math.min(W-1,x0+1),y1=Math.min(H-1,y0+1);
+  const fx=x-x0,fy=y-y0;
+  for(let c=0;c<4;c++){
+    const a=data[(y0*W+x0)*4+c]*(1-fx)+data[(y0*W+x1)*4+c]*fx;
+    const b=data[(y1*W+x0)*4+c]*(1-fx)+data[(y1*W+x1)*4+c]*fx;
+    out[k+c]=Math.round(a*(1-fy)+b*fy);
+  }
+}
+
+function warpQuadToSquare(quad){
+  const q=orderQuad(quad);
+  const top=Math.hypot(q[1].x-q[0].x,q[1].y-q[0].y);
+  const bot=Math.hypot(q[2].x-q[3].x,q[2].y-q[3].y);
+  const left=Math.hypot(q[3].x-q[0].x,q[3].y-q[0].y);
+  const right=Math.hypot(q[2].x-q[1].x,q[2].y-q[1].y);
+  const S=Math.round(clamp((top+bot+left+right)/4,260,760));
+  const Hm=homographySquareToQuad(S,q);
+  if(!Hm)return false;
+
+  const src=ctx.getImageData(0,0,cv.width,cv.height);
+  const out=ctx.createImageData(S,S);
+  const [a,b,c,d,e,f,g,h]=Hm;
+  for(let v=0;v<S;v++)for(let u=0;u<S;u++){
+    const den=g*u+h*v+1;
+    const x=(a*u+b*v+c)/den;
+    const y=(d*u+e*v+f)/den;
+    bilinearSample(src.data,src.width,src.height,x,y,out.data,(v*S+u)*4);
+  }
+  cv.width=S;cv.height=S;
+  ctx.putImageData(out,0,0);
+  sel=null;showBox();
+  return true;
+}
+
+function applyCornerWarp(){
+  if(cornerPts.length!==4)return;
+  const ok=warpQuadToSquare(cornerPts);
+  cornerMode=false;cornerModeBtn.classList.remove('active');
+  cornerPts=[];renderCorners();
+  if(!ok){
+    ans.textContent='四角校正失败';
+    note.textContent='请重新点“四角校正”，尽量点在题盘四个外角。';
+    return;
+  }
+  ans.textContent='已拉正，正在识别…';
+  note.textContent='透视校正只改变题盘几何，不改变五种图形分类规则。';
+  setTimeout(()=>autoLocateAndRecognize(),30);
+}
+
+cornerModeBtn.onclick=()=>{
+  if(!img)return alert('请先选择或拍摄图片');
+  cornerMode=!cornerMode;
+  cornerPts=[];
+  cornerModeBtn.classList.toggle('active',cornerMode);
+  cornerModeBtn.textContent=cornerMode?'请点题盘四角':'四角校正';
+  renderCorners();
+  if(cornerMode){
+    ans.textContent='四角校正';
+    note.textContent='请依次点击题盘四个外角；顺序不限，点满4个会自动拉正。';
+  }
+};
+
+restorePhotoBtn.onclick=()=>{
+  if(!originalCanvas)return;
+  cv.width=originalCanvas.width;cv.height=originalCanvas.height;
+  ctx.drawImage(originalCanvas,0,0);
+  sel=null;showBox();
+  cornerMode=false;cornerPts=[];cornerModeBtn.classList.remove('active');cornerModeBtn.textContent='四角校正';renderCorners();
+  target=null;cells=Array(n*n).fill(0).map(()=>({v:E,conf:1}));drawGrid();
+  ans.textContent='已恢复原图';
+  note.textContent='可以重新自动定位，或使用四角校正。';
+};
+
+// Generate a stronger edge profile ONLY for grid localization.
+// Recognition still samples colors/shapes from the untouched photo.
+function enhancedGridProfiles(){
   const W=cv.width,H=cv.height,d=ctx.getImageData(0,0,W,H).data;
+  const gray=new Float32Array(W*H);
+  for(let i=0;i<W*H;i++){
+    const k=i*4;
+    gray[i]=.299*d[k]+.587*d[k+1]+.114*d[k+2];
+  }
+
   const vx=new Float32Array(W),hy=new Float32Array(H);
 
-  // Edge energy: grid lines create long coherent edges, while text/icons are much shorter.
-  for(let x=1;x<W-1;x++){
+  // For each row/column use the strongest gradient in a small neighborhood.
+  // This makes pale gray grid lines survive phone exposure/blur.
+  for(let x=2;x<W-2;x++){
     let s=0;
     for(let y=0;y<H;y++){
-      const k1=(y*W+x-1)*4,k2=(y*W+x+1)*4;
-      s+=Math.min(80,Math.abs(grayAt(d,k2)-grayAt(d,k1)));
+      let best=0;
+      for(let dx=-2;dx<=2;dx++){
+        const xx=x+dx;
+        if(xx<1||xx>=W-1)continue;
+        const g=Math.abs(gray[y*W+xx+1]-gray[y*W+xx-1]);
+        if(g>best)best=g;
+      }
+      s+=Math.min(95,best*1.55);
     }
     vx[x]=s/H;
   }
-  for(let y=1;y<H-1;y++){
+  for(let y=2;y<H-2;y++){
     let s=0;
     for(let x=0;x<W;x++){
-      const k1=((y-1)*W+x)*4,k2=((y+1)*W+x)*4;
-      s+=Math.min(80,Math.abs(grayAt(d,k2)-grayAt(d,k1)));
+      let best=0;
+      for(let dy=-2;dy<=2;dy++){
+        const yy=y+dy;
+        if(yy<1||yy>=H-1)continue;
+        const g=Math.abs(gray[(yy+1)*W+x]-gray[(yy-1)*W+x]);
+        if(g>best)best=g;
+      }
+      s+=Math.min(95,best*1.55);
     }
     hy[y]=s/W;
   }
+  return {vx,hy};
+}
+
+function autoLocateGrid(){
+  if(!img||cv.width<80||cv.height<80)return false;
+  const W=cv.width,H=cv.height;
+  const {vx,hy}=enhancedGridProfiles();
 
   const xs=progressionCandidates(smooth1D(vx,5),n);
   const ys=progressionCandidates(smooth1D(hy,5),n);
