@@ -74,9 +74,75 @@ canvas{display:block;max-width:100%;height:auto;cursor:crosshair;touch-action:no
   .pal{height:56px;font-size:30px}
   #grid{max-width:min(92vw,430px)}
 }
+
+.mobileAnswerBar{
+  display:none;
+}
+@media(max-width:820px){
+  body{padding-top:78px}
+  .mobileAnswerBar{
+    display:flex;
+    position:fixed;
+    top:calc(8px + env(safe-area-inset-top));
+    left:10px;
+    right:10px;
+    z-index:9999;
+    min-height:60px;
+    padding:8px 14px;
+    border-radius:15px;
+    background:rgba(255,255,255,.96);
+    border:1px solid #cfe1dd;
+    box-shadow:0 6px 24px rgba(20,60,55,.18);
+    backdrop-filter:blur(10px);
+    -webkit-backdrop-filter:blur(10px);
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+  }
+  .mobileAnswerBar .mLabel{
+    font-size:12px;
+    color:#718087;
+    white-space:nowrap;
+  }
+  .mobileAnswerBar .mAnswer{
+    flex:1;
+    text-align:center;
+    font-size:34px;
+    line-height:1;
+    font-weight:900;
+    min-width:70px;
+  }
+  .mobileAnswerBar .mState{
+    font-size:12px;
+    color:#52636b;
+    max-width:44%;
+    text-align:right;
+    line-height:1.25;
+  }
+  .mobileAnswerBar.solved{
+    border-color:#9fd2c9;
+    background:rgba(238,248,246,.97);
+  }
+  .mobileAnswerBar.error{
+    border-color:#e6b0b0;
+    background:rgba(fff,245,245,.97);
+  }
+  .mobileAnswerBar.pending{
+    border-color:#ead39a;
+    background:rgba(255,250,235,.97);
+  }
+}
+
 </style>
 </head>
 <body>
+
+<div id="mobileAnswerBar" class="mobileAnswerBar pending">
+  <div class="mLabel">答案</div>
+  <div id="mobileAnswer" class="mAnswer">—</div>
+  <div id="mobileAnswerState" class="mState">等待识别</div>
+</div>
+
 <div class="wrap">
   <h1>图形数独截图求解器</h1>
   <div class="muted">
@@ -156,6 +222,17 @@ canvas{display:block;max-width:100%;height:auto;cursor:crosshair;touch-action:no
 const cv=document.getElementById('cv'),ctx=cv.getContext('2d',{willReadFrequently:true});
 const viewer=document.getElementById('viewer'),box=document.getElementById('box'),emptyHint=document.getElementById('emptyHint');
 const grid=document.getElementById('grid'),pal=document.getElementById('palette'),ans=document.getElementById('ans'),note=document.getElementById('note');
+const mobileAnswerBar=document.getElementById('mobileAnswerBar');
+const mobileAnswer=document.getElementById('mobileAnswer');
+const mobileAnswerState=document.getElementById('mobileAnswerState');
+
+function setMobileAnswer(kind,answerHTML,stateText){
+  mobileAnswerBar.classList.remove('solved','error','pending');
+  mobileAnswerBar.classList.add(kind||'pending');
+  mobileAnswer.innerHTML=answerHTML||'—';
+  mobileAnswerState.textContent=stateText||'';
+}
+
 const pasteZone=document.getElementById('pasteZone');
 const cornerSvg=document.getElementById('cornerSvg'),cornerPoly=document.getElementById('cornerPoly');
 const processStatus=document.getElementById('processStatus'),applyCornersBtn=document.getElementById('applyCorners');
@@ -1138,12 +1215,14 @@ document.getElementById('recognize').onclick=()=>{if(inputKind==='camera'||input
 document.getElementById('clear').onclick=()=>{
   cornerMode=false;manualCorners=[];viewer.classList.remove('cornerPicking');applyCornersBtn.classList.add('hidden');renderCorners();setProcessStatus('原图');
   init();sel=null;showBox();
-  if(img){ans.textContent='已重置';note.textContent='点击“自动定位并求解”即可重新识别。'}
+  if(img){ans.textContent='已重置';note.textContent='点击“自动定位并求解”即可重新识别。';setMobileAnswer('pending','—','等待识别')}
 };
 
 function solve(){
   if(target===null){
-    ans.textContent='请先点“？”格';note.textContent='';return
+    ans.textContent='请先点“？”格';note.textContent='';
+    setMobileAnswer('pending','—','等待识别问号');
+    return
   }
   let clues=[];
   cells.forEach((c,i)=>{if(c.v>=0)clues.push([i/n|0,i%n,c.v])});
@@ -1153,12 +1232,15 @@ function solve(){
   if(poss.length===1){
     ans.innerHTML=html(poss[0]);
     note.textContent='已得到唯一答案';
+    setMobileAnswer('solved',html(poss[0]),'唯一答案');
   }else if(poss.length===0){
     ans.textContent='识别结果有冲突';
     note.textContent='点右侧可疑格子，用下面图形按钮修正识别错误';
+    setMobileAnswer('error','!','识别结果有冲突');
   }else{
     ans.textContent='尚不能唯一确定';
     note.textContent='候选：'+poss.map(v=>S[v][1]).join(' / ')+'。请核对自动识别。';
+    setMobileAnswer('pending',poss.map(v=>html(v)).join(' '),'尚未唯一确定');
   }
 }
 
