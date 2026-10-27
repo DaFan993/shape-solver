@@ -198,11 +198,67 @@ canvas{display:block;max-width:100%;height:auto;cursor:crosshair;touch-action:no
   .manualPalette button{min-height:56px}
 }
 
+
+.manualEditor{
+  display:grid;
+  grid-template-columns:minmax(300px,430px) minmax(260px,1fr);
+  gap:22px;
+  align-items:start;
+  margin-top:14px;
+}
+.manualBoardWrap{
+  max-width:420px;
+  margin:0;
+}
+#manualGrid{
+  max-width:420px;
+}
+.manualSide{
+  display:flex;
+  flex-direction:column;
+  gap:14px;
+}
+.manualSide .row{
+  align-items:center;
+}
+.manualPalette{
+  grid-template-columns:repeat(3,minmax(78px,1fr));
+  margin-top:0;
+}
+.manualPalette button{
+  min-height:58px;
+  font-size:30px;
+}
+.manualResult{
+  margin-top:0;
+}
+.manualHint{
+  padding:10px 12px;
+  border-radius:12px;
+  background:#f8fbfa;
+  border:1px solid #e1ebe8;
+}
+@media(max-width:820px){
+  .manualEditor{
+    grid-template-columns:1fr;
+  }
+  .manualBoardWrap{
+    max-width:min(88vw,420px);
+    margin:0 auto;
+  }
+  #manualGrid{
+    max-width:min(88vw,420px);
+  }
+  .manualPalette{
+    grid-template-columns:repeat(4,1fr);
+  }
+}
+
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>图形数独截图求解器</h1><span style="display:inline-block;margin-left:8px;padding:4px 8px;border-radius:999px;background:#eef8f6;color:#0b615a;font-size:12px;font-weight:700">真实界面适配版-2·双模式</span><span style="display:inline-block;margin-left:8px;padding:4px 8px;border-radius:999px;background:#eef8f6;color:#0b615a;font-size:12px;font-weight:700">稳定回退版-1</span>
+  <h1>图形数独截图求解器</h1><span style="display:inline-block;margin-left:8px;padding:4px 8px;border-radius:999px;background:#eef8f6;color:#0b615a;font-size:12px;font-weight:700">真实界面适配版-3·手动编辑布局</span><span style="display:inline-block;margin-left:8px;padding:4px 8px;border-radius:999px;background:#eef8f6;color:#0b615a;font-size:12px;font-weight:700">稳定回退版-1</span>
   <div class="muted">
     电脑：可直接 <b>Ctrl+V / ⌘V</b> 粘贴截图。粘贴后会优先<b>自动定位题盘、自动寻找“？”并求解</b>；无需手动画框。自动定位失败时仍可手动框选兜底。
   </div>
@@ -299,35 +355,45 @@ canvas{display:block;max-width:100%;height:auto;cursor:crosshair;touch-action:no
 
   <div id="manualMode" class="modeHidden">
     <div class="card manualCard">
-      <div class="row">
-        <label>规格
-          <select id="manualSize">
-            <option value="5">5×5</option>
-            <option value="4">4×4</option>
-          </select>
-        </label>
-        <button id="manualRandom">随机出题</button>
-        <button id="manualSolve" class="primary">求解问号</button>
-        <button id="manualClear">清空棋盘</button>
+      <div class="muted" style="margin-bottom:8px">
+        左侧编辑题盘，右侧选择图形与操作。两个模式状态互不影响。
       </div>
 
-      <div class="muted" style="margin-top:8px">
-        点格子后，直接选择图形、问号或空格。这个模式完全独立，不显示左侧图片，也不会改变“图片识别”模式中的图片和识别结果。
-      </div>
+      <div class="manualEditor">
+        <div class="manualBoardWrap">
+          <div id="manualGrid"></div>
+        </div>
 
-      <div class="manualBoardWrap">
-        <div id="manualGrid"></div>
-      </div>
+        <div class="manualSide">
+          <div class="row">
+            <label>规格
+              <select id="manualSize">
+                <option value="5">5×5</option>
+                <option value="4">4×4</option>
+              </select>
+            </label>
+            <button id="manualRandom">随机出题</button>
+            <button id="manualClear">清空棋盘</button>
+          </div>
 
-      <div id="manualPalette" class="manualPalette"></div>
+          <div class="manualHint muted">
+            先点左侧格子，再点下面图形。可直接设为空格或问号。
+          </div>
 
-      <div class="manualResult">
-        <div class="muted">求解结果</div>
-        <div id="manualAnswer" class="manualAnswer">请先设置一个问号</div>
-        <div id="manualNote" class="muted"></div>
+          <div id="manualPalette" class="manualPalette"></div>
+
+          <button id="manualSolve" class="primary" style="width:100%">求解问号</button>
+
+          <div class="manualResult">
+            <div class="muted">求解结果</div>
+            <div id="manualAnswer" class="manualAnswer">请先设置一个问号</div>
+            <div id="manualNote" class="muted"></div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
+</div>
 </div>
 
 <script>
