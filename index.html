@@ -1153,26 +1153,97 @@ function recognize(autoMode=false){
     rawItems.push({i,r,c,sym,cands,bestScore:cands[0]?.score||0});
   }
 
-  // Automatically identify '?' as the one non-empty cell that fits the five icon templates worst.
-  // Disconnected hook+dot structure gives an additional strong signal.
+  // Robust '?' detection.
+  // Mobile photos can blur the hook and dot together, so do NOT rely only on a two-component '?' shape.
+  // We combine:
+  //   1) relative low saturation / dark-neutral appearance (question marks are normally black/gray),
+  //   2) poor fit to the five known icon templates,
+  //   3) hook+dot geometry when it survives the photo preprocessing,
+  //   4) Latin-square consistency: temporarily treat each suspicious cell as '?' and see whether the
+  //      remaining recognized symbols admit a complete row/column-consistent assignment and a unique answer.
   if(target===null&&rawItems.length){
-    const shapeScores=rawItems.map(x=>x.bestScore).sort((a,b)=>a-b);
-    const median=shapeScores[(shapeScores.length/2)|0]||0;
+    const shapeVals=rawItems.map(x=>x.bestScore).sort((a,b)=>a-b);
+    const satVals=rawItems.map(x=>x.sym.meanSat||0).sort((a,b)=>a-b);
+    const medShape=shapeVals[(shapeVals.length/2)|0]||0;
+    const medSat=satVals[(satVals.length/2)|0]||0;
+
+    function uniqueAnswerIfTarget(candidate){
+      const others=rawItems.filter(x=>x.i!==candidate.i).map(x=>({...x}));
+      const assign=globallyConsistentAssignments([...others]);
+      if(assign.size!==others.length)return {unique:false,count:0};
+
+      const clues=[];
+      for(const it of others){
+        const chosen=assign.get(it.i)||it.cands[0];
+        if(!chosen)return {unique:false,count:0};
+        clues.push([it.r,it.c,chosen.v]);
+      }
+
+      const poss=[];
+      for(let v=0;v<n;v++){
+        if(can(n,clues,candidate.r,candidate.c,v))poss.push(v);
+      }
+      return {unique:poss.length===1,count:poss.length,answer:poss[0]};
+    }
+
     let qBest=null;
     for(const it of rawItems){
-      const mismatch=Math.max(0,median-it.bestScore);
+      const sat=it.sym.meanSat||0;
       const sr=it.sym.secondRatio||0;
-      const disconnected=Math.min(.34,sr);
-      const hookDot=(it.sym.secondBelow&&sr>.018&&sr<.48)?.44:0;
-      const neutral=(it.sym.meanSat||0)<.20?.10:0;
-      const qScore=mismatch*1.65+disconnected*1.10+hookDot+neutral;
-      const plausible=(it.sym.secondBelow&&sr>.018&&sr<.48) ||
-        ((it.bestScore<median-.075) && (it.bestScore<.70 || sr>.03));
-      if(plausible&&(!qBest||qScore>qBest.qScore))qBest={...it,qScore};
+
+      const mismatch=Math.max(0,medShape-it.bestScore);
+      const neutralGap=Math.max(0,medSat-sat);
+
+      // Strong relative-neutral cue: resilient to palette changes because it compares cells within this puzzle.
+      const veryNeutral=sat<.18;
+      const relativelyNeutral=(medSat>.28 && sat<Math.min(.30,medSat-.14));
+
+      const disconnected=Math.min(.32,sr);
+      const hookDot=(it.sym.secondBelow&&sr>.012&&sr<.55)?.48:0;
+
+      // Only run the heavier logical check on candidates with at least one suspicious cue.
+      const suspicious=veryNeutral || relativelyNeutral ||
+        (it.sym.secondBelow&&sr>.012&&sr<.55) ||
+        (it.bestScore<medShape-.055);
+
+      let logic={unique:false,count:99};
+      if(suspicious)logic=uniqueAnswerIfTarget(it);
+
+      // Weight neutral appearance strongly on photos, but never make it the sole rule.
+      let qScore =
+        mismatch*1.65 +
+        neutralGap*1.55 +
+        (veryNeutral?.42:0) +
+        (relativelyNeutral?.28:0) +
+        disconnected*.72 +
+        hookDot +
+        (logic.unique?.38:0);
+
+      // If this cell looks very much like one of the five standard icons and is colorful,
+      // make it harder to incorrectly select as '?'.
+      if(it.bestScore>.78 && sat>.32)qScore-=.30;
+
+      if(suspicious && (!qBest||qScore>qBest.qScore)){
+        qBest={...it,qScore,logic};
+      }
     }
+
+    // Conservative fallback: in the common assessment layout, the '?' is the only dark/gray non-empty glyph.
+    // Use this only if it is clearly separated from the next-lowest saturation cell.
+    if(!qBest && rawItems.length>=2){
+      const bySat=[...rawItems].sort((a,b)=>(a.sym.meanSat||0)-(b.sym.meanSat||0));
+      const a=bySat[0],b=bySat[1];
+      const sa=a.sym.meanSat||0,sb=b.sym.meanSat||0;
+      if(sa<.22 && sb-sa>.10){
+        const logic=uniqueAnswerIfTarget(a);
+        qBest={...a,qScore:.25+(logic.unique?.38:0),logic};
+      }
+    }
+
     if(qBest){
       target=qBest.i;
-      cells[target].v=Q;cells[target].conf=1;
+      cells[target].v=Q;
+      cells[target].conf=1;
     }
   }
 
@@ -1198,7 +1269,7 @@ function recognize(autoMode=false){
 
   if(target===null){
     ans.textContent='题盘已识别，但未自动找到“？”';
-    note.textContent='请在右侧预览中点击问号所在格，再点下方“?”修正；其余图形已识别。';
+    note.textContent='自动问号识别仍不确定。请在右侧预览中点一下问号格，再点下方“?”；其余图形已识别。';
     return;
   }
 
