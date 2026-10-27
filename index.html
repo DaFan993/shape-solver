@@ -108,6 +108,7 @@ canvas{display:block;max-width:100%;height:auto;cursor:crosshair;touch-action:no
       <button id="restoreBtn">还原原图</button>
       <button id="clear">重置题盘</button>
       <span id="processStatus" class="statusPill">原图</span>
+<span class="statusPill" style="opacity:.72">版本：GitHub修复-1</span>
     </div>
 
     <div class="stage">
@@ -151,9 +152,10 @@ canvas{display:block;max-width:100%;height:auto;cursor:crosshair;touch-action:no
   </div>
 </div>
 
+<!-- OpenCV.js owns the global name `cv`. Do not reuse `cv` for the canvas DOM element. -->
 <script async src="https://docs.opencv.org/4.x/opencv.js"></script>
 <script>
-const cv=document.getElementById('cv'),ctx=cv.getContext('2d',{willReadFrequently:true});
+const canvasEl=document.getElementById('cv'),ctx=canvasEl.getContext('2d',{willReadFrequently:true});
 const viewer=document.getElementById('viewer'),box=document.getElementById('box'),emptyHint=document.getElementById('emptyHint');
 const grid=document.getElementById('grid'),pal=document.getElementById('palette'),ans=document.getElementById('ans'),note=document.getElementById('note');
 const pasteZone=document.getElementById('pasteZone');
@@ -221,10 +223,10 @@ function drawOriginalImage(){
   if(!img)return;
   const maxW=Math.min(1100, Math.max(320, viewer.clientWidth||900));
   const sc=Math.min(1,maxW/img.width);
-  cv.width=Math.max(1,Math.round(img.width*sc));
-  cv.height=Math.max(1,Math.round(img.height*sc));
-  ctx.clearRect(0,0,cv.width,cv.height);
-  ctx.drawImage(img,0,0,cv.width,cv.height);
+  canvasEl.width=Math.max(1,Math.round(img.width*sc));
+  canvasEl.height=Math.max(1,Math.round(img.height*sc));
+  ctx.clearRect(0,0,canvasEl.width,canvasEl.height);
+  ctx.drawImage(img,0,0,canvasEl.width,canvasEl.height);
   isPerspectiveCorrected=false;
   sel=null;showBox();manualCorners=[];renderCorners();
   processStatus.textContent='原图';processStatus.className='statusPill';
@@ -280,13 +282,13 @@ pasteZone.addEventListener('drop',e=>{
 });
 
 function pt(e){
-  let r=cv.getBoundingClientRect();
+  let r=canvasEl.getBoundingClientRect();
   return{
-    x:(e.clientX-r.left)*cv.width/r.width,
-    y:(e.clientY-r.top)*cv.height/r.height
+    x:(e.clientX-r.left)*canvasEl.width/r.width,
+    y:(e.clientY-r.top)*canvasEl.height/r.height
   }
 }
-cv.onpointerdown=e=>{
+canvasEl.onpointerdown=e=>{
   if(!img)return;
   if(cornerMode){
     const p=pt(e);
@@ -300,9 +302,9 @@ cv.onpointerdown=e=>{
     }
     return;
   }
-  drag=true;start=pt(e);cv.setPointerCapture(e.pointerId);
+  drag=true;start=pt(e);canvasEl.setPointerCapture(e.pointerId);
 }
-cv.onpointermove=e=>{
+canvasEl.onpointermove=e=>{
   if(cornerMode||!drag)return;
   let p=pt(e);
   sel={
@@ -311,12 +313,12 @@ cv.onpointermove=e=>{
   };
   showBox()
 }
-cv.onpointerup=e=>{if(cornerMode)return;drag=false;showBox()}
+canvasEl.onpointerup=e=>{if(cornerMode)return;drag=false;showBox()}
 
 function showBox(){
   if(!sel){box.style.display='none';return}
-  let cr=cv.getBoundingClientRect(),vr=viewer.getBoundingClientRect();
-  let sx=cr.width/cv.width,sy=cr.height/cv.height;
+  let cr=canvasEl.getBoundingClientRect(),vr=viewer.getBoundingClientRect();
+  let sx=cr.width/canvasEl.width,sy=cr.height/canvasEl.height;
   box.style.display='block';
   box.style.left=(cr.left-vr.left+sel.x*sx)+'px';
   box.style.top=(cr.top-vr.top+sel.y*sy)+'px';
@@ -334,13 +336,13 @@ function setProcessStatus(text,kind=''){
 function renderCorners(){
   if(!cornerSvg)return;
   if(!cornerMode||!manualCorners.length){cornerSvg.style.display='none';return}
-  const cr=cv.getBoundingClientRect(),vr=viewer.getBoundingClientRect();
+  const cr=canvasEl.getBoundingClientRect(),vr=viewer.getBoundingClientRect();
   cornerSvg.style.display='block';
   cornerSvg.style.left=(cr.left-vr.left)+'px';
   cornerSvg.style.top=(cr.top-vr.top)+'px';
   cornerSvg.style.width=cr.width+'px';
   cornerSvg.style.height=cr.height+'px';
-  cornerSvg.setAttribute('viewBox',`0 0 ${cv.width} ${cv.height}`);
+  cornerSvg.setAttribute('viewBox',`0 0 ${canvasEl.width} ${canvasEl.height}`);
   cornerSvg.innerHTML='';
   const ns='http://www.w3.org/2000/svg';
   if(manualCorners.length>1){
@@ -352,7 +354,7 @@ function renderCorners(){
   }
   manualCorners.forEach((p,i)=>{
     const c=document.createElementNS(ns,'circle');
-    c.setAttribute('cx',p.x);c.setAttribute('cy',p.y);c.setAttribute('r',Math.max(8,Math.min(cv.width,cv.height)*.012));
+    c.setAttribute('cx',p.x);c.setAttribute('cy',p.y);c.setAttribute('r',Math.max(8,Math.min(canvasEl.width,canvasEl.height)*.012));
     cornerSvg.appendChild(c);
     const t=document.createElementNS(ns,'text');
     t.setAttribute('x',p.x+10);t.setAttribute('y',p.y-10);t.setAttribute('fill','#e34f4f');t.setAttribute('font-size','22');t.setAttribute('font-weight','800');
@@ -432,7 +434,7 @@ async function detectGridQuadOpenCV(){
   if(!ocv)return null;
   let src=null,small=null,gray=null;
   try{
-    src=ocv.imread(cv);
+    src=ocv.imread(canvasEl);
     const maxDim=Math.max(src.cols,src.rows),scale=Math.min(1,1000/maxDim);
     small=new ocv.Mat();
     ocv.resize(src,small,new ocv.Size(Math.round(src.cols*scale),Math.round(src.rows*scale)),0,0,ocv.INTER_AREA);
@@ -520,7 +522,7 @@ async function warpAndEnhance(points){
   }
   let src=null,srcPts=null,dstPts=null,M=null,warp=null,rgb=null,filtered=null,blur=null,sharp=null,rgba=null;
   try{
-    src=ocv.imread(cv);
+    src=ocv.imread(canvasEl);
     const sideRaw=Math.max(
       pdist(q[0],q[1]),pdist(q[1],q[2]),pdist(q[2],q[3]),pdist(q[3],q[0])
     );
@@ -538,7 +540,7 @@ async function warpAndEnhance(points){
     sharp=new ocv.Mat();ocv.addWeighted(filtered,1.20,blur,-.20,0,sharp);
     rgba=new ocv.Mat();ocv.cvtColor(sharp,rgba,ocv.COLOR_RGB2RGBA);
 
-    cv.width=side;cv.height=side;ocv.imshow(cv,rgba);
+    canvasEl.width=side;canvasEl.height=side;ocv.imshow(canvasEl,rgba);
     sel={x:1,y:1,w:side-2,h:side-2};showBox();
     isPerspectiveCorrected=true;cornerMode=false;manualCorners=[];renderCorners();
     viewer.classList.remove('cornerPicking');applyCornersBtn.classList.add('hidden');
@@ -568,7 +570,7 @@ async function autoPerspectiveEnhance(){
     // The first quadrilateral may include a little title/margin. After perspective flattening,
     // the original equal-spacing locator becomes much more reliable and refines the exact grid.
     const refined=autoLocateGrid();
-    if(!refined)sel={x:1,y:1,w:cv.width-2,h:cv.height-2};
+    if(!refined)sel={x:1,y:1,w:canvasEl.width-2,h:canvasEl.height-2};
     showBox();
     recognize(true);
   }
@@ -601,7 +603,7 @@ document.getElementById('cornerBtn').onclick=enterCornerMode;
 applyCornersBtn.onclick=async()=>{
   if(manualCorners.length!==4)return;
   const ok=await warpAndEnhance(manualCorners);
-  if(ok){const refined=autoLocateGrid();if(!refined)sel={x:1,y:1,w:cv.width-2,h:cv.height-2};showBox();recognize(true);}
+  if(ok){const refined=autoLocateGrid();if(!refined)sel={x:1,y:1,w:canvasEl.width-2,h:canvasEl.height-2};showBox();recognize(true);}
 };
 document.getElementById('restoreBtn').onclick=()=>{
   if(!img)return;cornerMode=false;manualCorners=[];viewer.classList.remove('cornerPicking');applyCornersBtn.classList.add('hidden');
@@ -635,8 +637,8 @@ function topSeparatedPeaks(a,minSep=5,limit=100){
 function progressionCandidates(profile,n){
   const peaks=topSeparatedPeaks(profile,5,90);
   const candidates=[];
-  const minSpacing=Math.max(24,Math.min(cv.width,cv.height)*.035);
-  const maxSpacing=Math.min(cv.width,cv.height)*.38;
+  const minSpacing=Math.max(24,Math.min(canvasEl.width,canvasEl.height)*.035);
+  const maxSpacing=Math.min(canvasEl.width,canvasEl.height)*.38;
   const tol=6;
   let mean=0;
   for(const v of profile)mean+=v;
@@ -673,8 +675,8 @@ function progressionCandidates(profile,n){
 }
 
 function autoLocateGrid(){
-  if(!img||cv.width<80||cv.height<80)return false;
-  const W=cv.width,H=cv.height,d=ctx.getImageData(0,0,W,H).data;
+  if(!img||canvasEl.width<80||canvasEl.height<80)return false;
+  const W=canvasEl.width,H=canvasEl.height,d=ctx.getImageData(0,0,W,H).data;
   const vx=new Float32Array(W),hy=new Float32Array(H);
 
   // Edge energy: grid lines create long coherent edges, while text/icons are much shorter.
@@ -1064,7 +1066,7 @@ function recognize(autoMode=false){
     const y=Math.round(sel.y+r*ch+ch*.12);
     const w=Math.max(3,Math.round(cw*.76));
     const h=Math.max(3,Math.round(ch*.76));
-    if(x<0||y<0||x+w>cv.width||y+h>cv.height)continue;
+    if(x<0||y<0||x+w>canvasEl.width||y+h>canvasEl.height)continue;
 
     const im=ctx.getImageData(x,y,w,h);
     const sym=extractSymbol(im);
