@@ -1,0 +1,872 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>图形数独截图求解器 · 粘贴/手机版</title>
+<style>
+:root{
+  --green:#0f7c73;--green2:#0b615a;--ink:#20323c;--muted:#718087;
+  --line:#ccd7d9;--bg:#f6faf9;--card:#fff;--warn:#f0a51b;--danger:#c84f4f;
+}
+*{box-sizing:border-box}
+body{font-family:Arial,"PingFang SC","Microsoft YaHei",sans-serif;margin:0;background:var(--bg);color:var(--ink)}
+.wrap{max-width:1100px;margin:auto;padding:20px 16px 48px}
+h1{margin:0 0 6px;font-size:28px}
+.card{background:var(--card);border:1px solid #dfe8e5;border-radius:16px;padding:16px;margin-top:14px;box-shadow:0 8px 28px rgba(20,60,55,.05)}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+button,select,input{font:inherit}
+button,.fakeBtn{
+  border:1px solid #ccd8d5;background:#fff;border-radius:10px;padding:10px 15px;
+  font-weight:700;cursor:pointer;min-height:42px
+}
+.primary{background:var(--green);color:#fff;border-color:var(--green)}
+.primary:hover{background:var(--green2)}
+.muted{color:var(--muted);font-size:13px;line-height:1.65}
+.badge{display:inline-block;padding:5px 9px;border-radius:999px;background:#eaf6f4;color:var(--green2);font-size:12px;font-weight:700}
+.stage{display:grid;grid-template-columns:1.2fr .8fr;gap:16px;margin-top:14px}
+.viewer{
+  position:relative;background:#edf3f1;border-radius:12px;overflow:hidden;min-height:360px;
+  display:flex;align-items:center;justify-content:center;border:1px dashed #cad8d4
+}
+canvas{display:block;max-width:100%;height:auto;cursor:crosshair;touch-action:none}
+.box{position:absolute;border:3px solid var(--warn);background:#ffd65b20;pointer-events:none;display:none}
+#grid{display:grid;border:3px solid #2d3d45;background:#fff;aspect-ratio:1/1;width:100%;max-width:410px;margin:auto}
+.cell{
+  position:relative;display:flex;align-items:center;justify-content:center;
+  border-right:1px solid var(--line);border-bottom:1px solid var(--line);
+  font-size:clamp(32px,6vw,52px);cursor:pointer;user-select:none
+}
+.cell.target{background:#fff4d6;outline:3px solid var(--warn);outline-offset:-4px}
+.cell.active{box-shadow:inset 0 0 0 3px #0f7c7366}
+.cell.lowconf::after{content:"!";position:absolute;right:4px;bottom:1px;color:#c84f4f;font-size:13px;font-weight:900}
+.palette{display:grid;grid-template-columns:repeat(7,1fr);gap:7px;margin-top:10px}
+.pal{height:50px;padding:0;font-size:28px}
+.result{margin-top:12px;background:#eef8f6;border:1px solid #cce6e1;border-radius:12px;padding:12px}
+.answer{font-size:38px;font-weight:800;min-height:46px}
+.circle{color:#8ca90e}.triangle{color:#2f70b1}.star{color:#8950a4}.square{color:#dd4d36}.plus{color:#2e96c9}
+.pasteZone{
+  border:2px dashed #b8cdca;border-radius:14px;padding:16px;margin-top:12px;background:#fbfdfc;
+  text-align:center;color:#587078
+}
+.pasteZone.drag{border-color:var(--green);background:#eef8f6}
+.pasteZone b{color:var(--ink)}
+.mobileBtns{display:none}
+.fileInput{max-width:260px}
+.hidden{display:none!important}
+@media(max-width:820px){
+  .wrap{padding:14px 10px 34px}
+  h1{font-size:23px}
+  .stage{grid-template-columns:1fr}
+  .viewer{min-height:280px}
+  .desktopHint{display:none}
+  .mobileBtns{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  button,.fakeBtn,select{min-height:46px}
+  .palette{grid-template-columns:repeat(4,1fr)}
+  .pal{height:56px;font-size:30px}
+  #grid{max-width:min(92vw,430px)}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>图形数独截图求解器</h1>
+  <div class="muted">
+    电脑：可直接 <b>Ctrl+V / ⌘V</b> 粘贴截图。粘贴后会优先<b>自动定位题盘、自动寻找“？”并求解</b>；无需手动画框。自动定位失败时仍可手动框选兜底。
+  </div>
+
+  <div id="pasteZone" class="pasteZone">
+    <div class="desktopHint"><b>直接把截图粘贴到这里</b>（Ctrl+V / ⌘V），也支持拖拽图片。</div>
+    <div class="mobileBtns">
+      <label class="fakeBtn">从相册选择<input id="mobileGallery" class="hidden" type="file" accept="image/*"></label>
+      <label class="fakeBtn">直接拍照<input id="mobileCamera" class="hidden" type="file" accept="image/*" capture="environment"></label>
+    </div>
+    <div class="muted" style="margin-top:6px">截图识别最稳；拍照也可以，但尽量正对屏幕并避免反光。</div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <label>图片 <input id="file" class="fileInput" type="file" accept="image/*"></label>
+      <label>规格
+        <select id="size">
+          <option value="5">5×5</option>
+          <option value="4">4×4</option>
+        </select>
+      </label>
+      <button id="recognize" class="primary">自动定位并求解</button>
+      <button id="clear">重置题盘</button>
+    </div>
+
+    <div class="stage">
+      <div>
+        <div class="viewer" id="viewer">
+          <canvas id="cv"></canvas>
+          <div id="box" class="box"></div>
+          <div id="emptyHint" class="muted" style="position:absolute;text-align:center;padding:20px">
+            等待图片<br>电脑可直接粘贴截图
+          </div>
+        </div>
+        <div class="muted" style="margin-top:7px">
+          通常无需操作：网页会自动找网格。若自动定位失败，可用鼠标/手指从题盘左上拖到右下手动框选。
+        </div>
+      </div>
+
+      <div>
+        <div class="row" style="justify-content:space-between;margin-bottom:8px">
+          <span class="badge">识别后的题盘</span>
+          <span class="muted">点格子可修正</span>
+        </div>
+        <div id="grid"></div>
+        <div class="muted" style="margin-top:8px">
+          “？”会自动检测。若检测错，可点目标格后用下方“?”按钮修正；其他格也可手动修正。
+        </div>
+        <div class="palette" id="palette"></div>
+
+        <div class="result">
+          <div class="muted">求解结果</div>
+          <div class="answer" id="ans">等待图片</div>
+          <div class="muted" id="note"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card muted">
+    <b>手机端说明</b><br>
+    这个网页本身支持手机布局和触控。如果手机浏览器不允许本地 HTML 完整运行，最好把这个文件放到一个静态网址（例如 Vercel / GitHub Pages）后用 Safari 或 Chrome 打开。
+    手机上“从剪贴板粘贴图片”的支持因浏览器而异，因此保留了相册和相机入口。
+  </div>
+</div>
+
+<script>
+const cv=document.getElementById('cv'),ctx=cv.getContext('2d',{willReadFrequently:true});
+const viewer=document.getElementById('viewer'),box=document.getElementById('box'),emptyHint=document.getElementById('emptyHint');
+const grid=document.getElementById('grid'),pal=document.getElementById('palette'),ans=document.getElementById('ans'),note=document.getElementById('note');
+const pasteZone=document.getElementById('pasteZone');
+
+let img=null,sel=null,drag=false,start=null,n=5,cells=[],target=null,active=0;
+
+const S=[['circle','●'],['triangle','▲'],['star','★'],['square','■'],['plus','✚']];
+const E=-1,Q=-2;
+
+function cls(v){return v>=0?S[v][0]:''}
+function html(v){
+  if(v===E)return '';
+  if(v===Q)return '<b style="color:#5e6a70">?</b>';
+  return `<span class="${cls(v)}">${S[v][1]}</span>`;
+}
+function init(){
+  n=+document.getElementById('size').value;
+  cells=Array(n*n).fill(0).map(()=>({v:E,conf:1}));
+  target=null;active=0;drawGrid();drawPal();solve();
+}
+document.getElementById('size').onchange=()=>{
+  init();
+  if(img)setTimeout(()=>autoLocateAndRecognize(),20);
+};
+
+function drawGrid(){
+  grid.style.gridTemplateColumns=`repeat(${n},1fr)`;grid.innerHTML='';
+  cells.forEach((c,i)=>{
+    let d=document.createElement('div');
+    d.className='cell'+(i===target?' target':'')+(i===active?' active':'')+((c.conf??1)<.16&&c.v>=0?' lowconf':'');
+    d.style.borderRight=i%n===n-1?'0':'';
+    d.style.borderBottom=((i/n|0)===n-1)?'0':'';
+    d.innerHTML=html(c.v);
+    d.onclick=()=>{
+      active=i;
+      if(target===null){target=i;c.v=Q}
+      drawGrid();solve()
+    };
+    grid.appendChild(d)
+  })
+}
+function drawPal(){
+  pal.innerHTML='';
+  [...S.slice(0,n).map((x,i)=>[i,x[1]]),[E,'·'],[Q,'?']].forEach(([v,t])=>{
+    let b=document.createElement('button');b.className='pal';
+    b.innerHTML=v>=0?html(v):t;
+    b.onclick=()=>{
+      if(v===Q){
+        if(target!==null&&target!==active)cells[target].v=E;
+        target=active;cells[active].v=Q;cells[active].conf=1;
+      }else{
+        if(target===active)target=null;
+        cells[active].v=v;cells[active].conf=1;
+      }
+      drawGrid();solve()
+    };
+    pal.appendChild(b)
+  })
+}
+
+function loadFile(file){
+  if(!file)return;
+  if(!file.type.startsWith('image/')){
+    alert('请粘贴或选择图片文件');
+    return;
+  }
+  const im=new Image();
+  im.onload=()=>{
+    img=im;
+    init();
+    const maxW=Math.min(900, Math.max(320, viewer.clientWidth||900));
+    const sc=Math.min(1,maxW/im.width);
+    cv.width=Math.max(1,Math.round(im.width*sc));
+    cv.height=Math.max(1,Math.round(im.height*sc));
+    ctx.clearRect(0,0,cv.width,cv.height);
+    ctx.drawImage(im,0,0,cv.width,cv.height);
+    emptyHint.style.display='none';
+    sel=null;showBox();
+    ans.textContent='正在自动定位…';
+    note.textContent='正在寻找等间距网格线和问号位置。';
+    setTimeout(()=>autoLocateAndRecognize(),30);
+  };
+  im.src=URL.createObjectURL(file);
+}
+document.getElementById('file').onchange=e=>loadFile(e.target.files[0]);
+document.getElementById('mobileGallery').onchange=e=>loadFile(e.target.files[0]);
+document.getElementById('mobileCamera').onchange=e=>loadFile(e.target.files[0]);
+
+// Clipboard paste: Ctrl+V / Cmd+V
+window.addEventListener('paste',e=>{
+  const items=[...(e.clipboardData?.items||[])];
+  const imgItem=items.find(x=>x.type&&x.type.startsWith('image/'));
+  if(imgItem){
+    e.preventDefault();
+    const f=imgItem.getAsFile();
+    loadFile(f);
+    pasteZone.classList.add('drag');
+    setTimeout(()=>pasteZone.classList.remove('drag'),300);
+  }
+});
+
+// Drag & drop
+['dragenter','dragover'].forEach(ev=>pasteZone.addEventListener(ev,e=>{
+  e.preventDefault();pasteZone.classList.add('drag');
+}));
+['dragleave','drop'].forEach(ev=>pasteZone.addEventListener(ev,e=>{
+  e.preventDefault();pasteZone.classList.remove('drag');
+}));
+pasteZone.addEventListener('drop',e=>{
+  const f=[...(e.dataTransfer?.files||[])].find(x=>x.type.startsWith('image/'));
+  if(f)loadFile(f);
+});
+
+function pt(e){
+  let r=cv.getBoundingClientRect();
+  return{
+    x:(e.clientX-r.left)*cv.width/r.width,
+    y:(e.clientY-r.top)*cv.height/r.height
+  }
+}
+cv.onpointerdown=e=>{
+  if(!img)return;
+  drag=true;start=pt(e);cv.setPointerCapture(e.pointerId);
+}
+cv.onpointermove=e=>{
+  if(!drag)return;
+  let p=pt(e);
+  sel={
+    x:Math.min(start.x,p.x),y:Math.min(start.y,p.y),
+    w:Math.abs(p.x-start.x),h:Math.abs(p.y-start.y)
+  };
+  showBox()
+}
+cv.onpointerup=e=>{drag=false;showBox()}
+
+function showBox(){
+  if(!sel){box.style.display='none';return}
+  let cr=cv.getBoundingClientRect(),vr=viewer.getBoundingClientRect();
+  let sx=cr.width/cv.width,sy=cr.height/cv.height;
+  box.style.display='block';
+  box.style.left=(cr.left-vr.left+sel.x*sx)+'px';
+  box.style.top=(cr.top-vr.top+sel.y*sy)+'px';
+  box.style.width=sel.w*sx+'px';
+  box.style.height=sel.h*sy+'px'
+}
+
+
+function grayAt(data,k){return (data[k]+data[k+1]+data[k+2])/3}
+
+function smooth1D(a,k=5){
+  const out=new Float32Array(a.length),half=(k/2)|0;
+  for(let i=0;i<a.length;i++){
+    let s=0,c=0;
+    for(let j=Math.max(0,i-half);j<=Math.min(a.length-1,i+half);j++){s+=a[j];c++}
+    out[i]=s/c;
+  }
+  return out;
+}
+
+function topSeparatedPeaks(a,minSep=5,limit=100){
+  const idx=Array.from({length:a.length},(_,i)=>i).sort((i,j)=>a[j]-a[i]);
+  const out=[];
+  for(const p of idx){
+    if(out.every(q=>Math.abs(p-q)>=minSep)){
+      out.push(p);
+      if(out.length>=limit)break;
+    }
+  }
+  return out;
+}
+
+function progressionCandidates(profile,n){
+  const peaks=topSeparatedPeaks(profile,5,90);
+  const candidates=[];
+  const minSpacing=Math.max(24,Math.min(cv.width,cv.height)*.035);
+  const maxSpacing=Math.min(cv.width,cv.height)*.38;
+  const tol=6;
+  let mean=0;
+  for(const v of profile)mean+=v;
+  mean/=Math.max(1,profile.length);
+
+  for(let ai=0;ai<peaks.length;ai++)for(let bi=0;bi<peaks.length;bi++){
+    const s=peaks[ai],e=peaks[bi];
+    if(e<=s)continue;
+    const spacing=(e-s)/n;
+    if(spacing<minSpacing||spacing>maxSpacing)continue;
+    const pos=[],vals=[];
+    let err=0;
+    for(let k=0;k<=n;k++){
+      const exp=s+k*spacing;
+      const lo=Math.max(1,Math.round(exp)-tol),hi=Math.min(profile.length-2,Math.round(exp)+tol);
+      let best=lo;
+      for(let j=lo+1;j<=hi;j++)if(profile[j]>profile[best])best=j;
+      pos.push(best);vals.push(profile[best]);err+=Math.abs(best-exp);
+    }
+    const avg=vals.reduce((a,b)=>a+b,0)/(n+1);
+    // Long evenly-spaced sequences are favored; profile strength is normalized by the image baseline.
+    const score=avg/(mean+.001)-.035*err+.0008*(e-s);
+    candidates.push({score,pos,spacing,extent:e-s});
+  }
+  candidates.sort((a,b)=>b.score-a.score);
+  const unique=[];
+  for(const c of candidates){
+    if(unique.every(u=>Math.abs(u.pos[0]-c.pos[0])>8||Math.abs(u.pos[n]-c.pos[n])>8)){
+      unique.push(c);
+      if(unique.length>=12)break;
+    }
+  }
+  return unique;
+}
+
+function autoLocateGrid(){
+  if(!img||cv.width<80||cv.height<80)return false;
+  const W=cv.width,H=cv.height,d=ctx.getImageData(0,0,W,H).data;
+  const vx=new Float32Array(W),hy=new Float32Array(H);
+
+  // Edge energy: grid lines create long coherent edges, while text/icons are much shorter.
+  for(let x=1;x<W-1;x++){
+    let s=0;
+    for(let y=0;y<H;y++){
+      const k1=(y*W+x-1)*4,k2=(y*W+x+1)*4;
+      s+=Math.min(80,Math.abs(grayAt(d,k2)-grayAt(d,k1)));
+    }
+    vx[x]=s/H;
+  }
+  for(let y=1;y<H-1;y++){
+    let s=0;
+    for(let x=0;x<W;x++){
+      const k1=((y-1)*W+x)*4,k2=((y+1)*W+x)*4;
+      s+=Math.min(80,Math.abs(grayAt(d,k2)-grayAt(d,k1)));
+    }
+    hy[y]=s/W;
+  }
+
+  const xs=progressionCandidates(smooth1D(vx,5),n);
+  const ys=progressionCandidates(smooth1D(hy,5),n);
+  if(!xs.length||!ys.length)return false;
+
+  let best=null;
+  for(const X of xs)for(const Y of ys){
+    const ratio=X.spacing/Y.spacing;
+    if(ratio<.80||ratio>1.25)continue;
+    const er=X.extent/Y.extent;
+    if(er<.78||er>1.28)continue;
+    // Prefer square-ish cells, strong line sequences, and larger grids.
+    const squarePenalty=Math.abs(Math.log(ratio))*3;
+    const score=X.score+Y.score-squarePenalty+.0005*(X.extent+Y.extent);
+    if(!best||score>best.score)best={score,X,Y};
+  }
+  if(!best)return false;
+
+  const xp=best.X.pos,yp=best.Y.pos;
+  sel={
+    x:Math.max(0,xp[0]),
+    y:Math.max(0,yp[0]),
+    w:Math.min(W-1,xp[n])-xp[0],
+    h:Math.min(H-1,yp[n])-yp[0]
+  };
+  if(sel.w<120||sel.h<120)return false;
+  showBox();
+  return true;
+}
+
+function autoLocateAndRecognize(){
+  if(!img)return;
+  target=null;
+  cells=Array(n*n).fill(0).map(()=>({v:E,conf:1}));
+  drawGrid();
+
+  const ok=autoLocateGrid();
+  if(!ok){
+    ans.textContent='自动定位失败';
+    note.textContent='请手动框住题盘后再点“自动定位并求解”。';
+    return;
+  }
+  ans.textContent='正在识别…';
+  note.textContent='题盘已自动定位，正在寻找问号并识别五种图形。';
+  setTimeout(()=>recognize(true),10);
+}
+
+
+
+function hsv(r,g,b){
+  r/=255;g/=255;b/=255;
+  let M=Math.max(r,g,b),m=Math.min(r,g,b),d=M-m,h=0;
+  if(d){
+    if(M===r)h=((g-b)/d)%6;
+    else if(M===g)h=(b-r)/d+2;
+    else h=(r-g)/d+4;
+    h*=60;if(h<0)h+=360;
+  }
+  return [h,M?d/M:0,M];
+}
+function hueDist(a,b){
+  let d=Math.abs(a-b)%360;return Math.min(d,360-d);
+}
+function rgbDist(a,b){
+  const dr=a[0]-b[0],dg=a[1]-b[1],db=a[2]-b[2];
+  return Math.sqrt(dr*dr+dg*dg+db*db);
+}
+
+// Estimate the cell background from its outer ring, then segment pixels that differ
+// substantially from that background. This works even if the official test changes colors.
+function estimateBackground(im){
+  const W=im.width,H=im.height,d=im.data,pts=[];
+  const ring=Math.max(2,Math.round(Math.min(W,H)*.12));
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+    if(x<ring||x>=W-ring||y<ring||y>=H-ring){
+      const k=(y*W+x)*4;
+      pts.push([d[k],d[k+1],d[k+2]]);
+    }
+  }
+  // Approximate median by per-channel sorted median.
+  const ch=[0,1,2].map(c=>{
+    const a=pts.map(p=>p[c]).sort((x,y)=>x-y);
+    return a[(a.length/2)|0];
+  });
+  return ch;
+}
+
+function extractSymbol(im){
+  const W=im.width,H=im.height,d=im.data;
+  const bg=estimateBackground(im);
+  const mask=new Uint8Array(W*H);
+  let count=0;
+
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+    const k=(y*W+x)*4;
+    const rgb=[d[k],d[k+1],d[k+2]];
+    const [h,s,v]=hsv(...rgb);
+    const diff=rgbDist(rgb,bg);
+    const lum=(rgb[0]+rgb[1]+rgb[2])/3;
+
+    // Main criterion: different from local cell background.
+    // Saturation/darkness is only supporting evidence, not a fixed color mapping.
+    if(diff>42 && (s>.10 || lum<175)){
+      mask[y*W+x]=1;count++;
+    }
+  }
+  if(count<W*H*.009)return null;
+
+  // Connected components: normal icons are usually one component; '?' usually has a hook + dot.
+  const seen=new Uint8Array(W*H),dirs=[[1,0],[-1,0],[0,1],[0,-1]];
+  const comps=[];
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+    const p=y*W+x;
+    if(!mask[p]||seen[p])continue;
+    const q=[p],comp=[];seen[p]=1;
+    for(let qi=0;qi<q.length;qi++){
+      const u=q[qi];comp.push(u);
+      const ux=u%W,uy=(u/W)|0;
+      for(const [dx,dy] of dirs){
+        const nx=ux+dx,ny=uy+dy;
+        if(nx>=0&&nx<W&&ny>=0&&ny<H){
+          const z=ny*W+nx;
+          if(mask[z]&&!seen[z]){seen[z]=1;q.push(z)}
+        }
+      }
+    }
+    if(comp.length>=Math.max(3,W*H*.001))comps.push(comp);
+  }
+  comps.sort((a,b)=>b.length-a.length);
+  const best=comps[0]||[];
+  if(best.length<W*H*.007)return null;
+
+  let minx=W,miny=H,maxx=-1,maxy=-1;
+  const out=new Uint8Array(W*H);
+  let sx=0,sy=0,mean=[0,0,0],w=0;
+  for(const p of best){
+    const x=p%W,y=(p/W)|0,k=p*4;
+    out[p]=1;
+    minx=Math.min(minx,x);maxx=Math.max(maxx,x);
+    miny=Math.min(miny,y);maxy=Math.max(maxy,y);
+    const rgb=[d[k],d[k+1],d[k+2]];
+    const [hh,ss]=hsv(...rgb);
+    sx+=Math.cos(hh*Math.PI/180)*Math.max(ss,.05);
+    sy+=Math.sin(hh*Math.PI/180)*Math.max(ss,.05);
+    mean[0]+=rgb[0];mean[1]+=rgb[1];mean[2]+=rgb[2];w++;
+  }
+  let hue=Math.atan2(sy,sx)*180/Math.PI;if(hue<0)hue+=360;
+  mean=mean.map(v=>v/w);
+
+  const secondRatio=(comps[1]?.length||0)/Math.max(1,best.length);
+  let meanSat=0;
+  for(const p of best){
+    const k=p*4;
+    meanSat+=hsv(d[k],d[k+1],d[k+2])[1];
+  }
+  meanSat/=Math.max(1,best.length);
+  return {
+    mask:out,W,H,bbox:[minx,miny,maxx,maxy],area:best.length,
+    hue,rgb:mean,bg,secondRatio,componentCount:comps.length,meanSat
+  };
+}
+
+const TS=72;
+
+function normalizeMask(sym,SZ=TS,scaleMul=1){
+  const {mask,W,H,bbox}=sym;
+  const [minx,miny,maxx,maxy]=bbox;
+  const bw=maxx-minx+1,bh=maxy-miny+1;
+  const dst=new Uint8Array(SZ*SZ);
+  const base=Math.min((SZ-12)/bw,(SZ-12)/bh);
+  const sc=base*scaleMul;
+  const nw=bw*sc,nh=bh*sc,ox=(SZ-nw)/2,oy=(SZ-nh)/2;
+  for(let yy=0;yy<SZ;yy++)for(let xx=0;xx<SZ;xx++){
+    const sx=Math.round((xx-ox)/sc+minx);
+    const sy=Math.round((yy-oy)/sc+miny);
+    if(sx>=minx&&sx<=maxx&&sy>=miny&&sy<=maxy&&mask[sy*W+sx])dst[yy*SZ+xx]=1;
+  }
+  return dst;
+}
+
+function makeTemplates(SZ=TS){
+  const names=['circle','triangle','star','square','plus'];
+  return names.map(name=>{
+    const c=document.createElement('canvas');c.width=SZ;c.height=SZ;
+    const x=c.getContext('2d');x.fillStyle='#000';x.translate(SZ/2,SZ/2);
+    if(name==='circle'){
+      x.beginPath();x.arc(0,0,SZ*.34,0,Math.PI*2);x.fill();
+    }else if(name==='square'){
+      x.fillRect(-SZ*.31,-SZ*.31,SZ*.62,SZ*.62);
+    }else if(name==='triangle'){
+      x.beginPath();x.moveTo(0,-SZ*.37);x.lineTo(SZ*.36,SZ*.31);x.lineTo(-SZ*.36,SZ*.31);x.closePath();x.fill();
+    }else if(name==='plus'){
+      x.fillRect(-SZ*.105,-SZ*.36,SZ*.21,SZ*.72);
+      x.fillRect(-SZ*.36,-SZ*.105,SZ*.72,SZ*.21);
+    }else if(name==='star'){
+      x.beginPath();
+      for(let i=0;i<10;i++){
+        const a=-Math.PI/2+i*Math.PI/5;
+        const rr=i%2===0?SZ*.37:SZ*.16;
+        const px=Math.cos(a)*rr,py=Math.sin(a)*rr;
+        if(i===0)x.moveTo(px,py);else x.lineTo(px,py);
+      }
+      x.closePath();x.fill();
+    }
+    const dd=x.getImageData(0,0,SZ,SZ).data,m=new Uint8Array(SZ*SZ);
+    for(let i=0;i<SZ*SZ;i++)if(dd[i*4+3]>50)m[i]=1;
+    return m;
+  });
+}
+const TEMPLATES=makeTemplates();
+
+function shiftedDice(a,b,dx,dy,SZ=TS){
+  let inter=0,sa=0,sb=0;
+  for(let y=0;y<SZ;y++)for(let x=0;x<SZ;x++){
+    const av=a[y*SZ+x];
+    const bx=x+dx,by=y+dy;
+    const bv=(bx>=0&&bx<SZ&&by>=0&&by<SZ)?b[by*SZ+bx]:0;
+    if(av)sa++;if(bv)sb++;if(av&&bv)inter++;
+  }
+  return (sa+sb)?2*inter/(sa+sb):0;
+}
+function projectionScore(a,b,SZ=TS){
+  const ar=Array(SZ).fill(0),ac=Array(SZ).fill(0),br=Array(SZ).fill(0),bc=Array(SZ).fill(0);
+  for(let y=0;y<SZ;y++)for(let x=0;x<SZ;x++){
+    const i=y*SZ+x;
+    if(a[i]){ar[y]++;ac[x]++}
+    if(b[i]){br[y]++;bc[x]++}
+  }
+  let diff=0,total=0;
+  for(let i=0;i<SZ;i++){
+    diff+=Math.abs(ar[i]-br[i])+Math.abs(ac[i]-bc[i]);
+    total+=Math.max(ar[i],br[i])+Math.max(ac[i],bc[i]);
+  }
+  return total?1-diff/total:0;
+}
+
+// Radial occupancy around the centroid helps distinguish 4-arm plus from 5-arm star.
+function radialSignature(mask,SZ=TS,bins=36){
+  let sx=0,sy=0,c=0;
+  for(let y=0;y<SZ;y++)for(let x=0;x<SZ;x++)if(mask[y*SZ+x]){sx+=x;sy+=y;c++}
+  if(!c)return Array(bins).fill(0);
+  const cx=sx/c,cy=sy/c,sig=Array(bins).fill(0);
+  for(let y=0;y<SZ;y++)for(let x=0;x<SZ;x++)if(mask[y*SZ+x]){
+    const a=(Math.atan2(y-cy,x-cx)+Math.PI*2)%(Math.PI*2);
+    const b=Math.floor(a/(Math.PI*2)*bins)%bins;
+    const r=Math.hypot(x-cx,y-cy);
+    if(r>sig[b])sig[b]=r;
+  }
+  const m=Math.max(...sig)||1;
+  return sig.map(v=>v/m);
+}
+const TEMPLATE_SIGS=TEMPLATES.map(t=>radialSignature(t));
+
+function sigScore(a,b){
+  let d=0;
+  for(let i=0;i<a.length;i++)d+=Math.abs(a[i]-b[i]);
+  return Math.max(0,1-d/a.length);
+}
+function templateScore(mask,tpl,tplSig){
+  let best=0;
+  for(let dy=-3;dy<=3;dy++)for(let dx=-3;dx<=3;dx++){
+    best=Math.max(best,shiftedDice(mask,tpl,dx,dy));
+  }
+  const proj=projectionScore(mask,tpl);
+  const rs=sigScore(radialSignature(mask),tplSig);
+  return .66*best+.20*proj+.14*rs;
+}
+
+function shapeCandidates(sym){
+  if(!sym)return [{v:E,score:1}];
+  const scores=Array(n).fill(0);
+  // Test a few normalization scales to tolerate slightly different official icon sizes.
+  for(const scaleMul of [.93,1,1.07]){
+    const nm=normalizeMask(sym,TS,scaleMul);
+    for(let v=0;v<n;v++){
+      scores[v]=Math.max(scores[v],templateScore(nm,TEMPLATES[v],TEMPLATE_SIGS[v]));
+    }
+  }
+  return scores.map((score,v)=>({v,score})).sort((a,b)=>b.score-a.score);
+}
+
+// Same-color evidence is learned INSIDE the current puzzle only.
+// It never assumes "purple=star" etc. Similar colors only encourage consistent labels.
+function buildColorGroups(items){
+  const groups=[];
+  for(const it of items){
+    let best=-1,bd=1e9;
+    for(let g=0;g<groups.length;g++){
+      const d=rgbDist(it.sym.rgb,groups[g].rgb);
+      if(d<bd){bd=d;best=g}
+    }
+    if(best>=0&&bd<38){
+      const G=groups[best],k=G.items.length;
+      G.rgb=G.rgb.map((v,j)=>(v*k+it.sym.rgb[j])/(k+1));
+      G.items.push(it);
+      it.colorGroup=best;
+    }else{
+      it.colorGroup=groups.length;
+      groups.push({rgb:[...it.sym.rgb],items:[it]});
+    }
+  }
+  return groups;
+}
+
+function globallyConsistentAssignments(items){
+  if(!items.length)return new Map();
+  const rowMask=Array(n).fill(0),colMask=Array(n).fill(0);
+  const groups=buildColorGroups(items);
+  const groupCounts=groups.map(()=>Array(n).fill(0));
+
+  items.sort((a,b)=>{
+    const ma=a.cands[0].score-(a.cands[1]?.score||0);
+    const mb=b.cands[0].score-(b.cands[1]?.score||0);
+    return mb-ma;
+  });
+
+  let bestScore=-1e9,best=null,nodes=0;
+  const cur=new Map();
+
+  function dfs(k,score){
+    if(++nodes>450000)return;
+    if(k===items.length){
+      if(score>bestScore){bestScore=score;best=new Map(cur)}
+      return;
+    }
+    const it=items[k],r=it.r,c=it.c;
+    for(const cd of it.cands.slice(0,Math.min(n,4))){
+      const bit=1<<cd.v;
+      if((rowMask[r]&bit)||(colMask[c]&bit))continue;
+
+      // If several icons in this puzzle have nearly the same sampled color,
+      // gently reward assigning them the same shape. This is only a small bonus.
+      const gc=groupCounts[it.colorGroup];
+      const same=gc[cd.v];
+      const other=gc.reduce((a,v,idx)=>a+(idx===cd.v?0:v),0);
+      const colorBonus=same*.055-other*.012;
+
+      rowMask[r]|=bit;colMask[c]|=bit;gc[cd.v]++;cur.set(it.i,cd);
+      dfs(k+1,score+Math.log(Math.max(cd.score,.0001))+colorBonus);
+      rowMask[r]^=bit;colMask[c]^=bit;gc[cd.v]--;cur.delete(it.i);
+    }
+  }
+  dfs(0,0);
+  return best||new Map();
+}
+
+function recognize(autoMode=false){
+  if(!sel||sel.w<50||sel.h<50){
+    // Button press with no selection should first attempt automatic localization.
+    if(autoLocateGrid())return recognize(true);
+    alert('未能自动定位题盘，请手动框住题盘');
+    return;
+  }
+  const cw=sel.w/n,ch=sel.h/n;
+  const rawItems=[];
+
+  for(let r=0;r<n;r++)for(let c=0;c<n;c++){
+    const i=r*n+c;
+
+    const x=Math.round(sel.x+c*cw+cw*.12);
+    const y=Math.round(sel.y+r*ch+ch*.12);
+    const w=Math.max(3,Math.round(cw*.76));
+    const h=Math.max(3,Math.round(ch*.76));
+    if(x<0||y<0||x+w>cv.width||y+h>cv.height)continue;
+
+    const im=ctx.getImageData(x,y,w,h);
+    const sym=extractSymbol(im);
+    if(!sym){
+      cells[i].v=E;cells[i].conf=1;
+      continue;
+    }
+    const cands=shapeCandidates(sym);
+    rawItems.push({i,r,c,sym,cands,bestScore:cands[0]?.score||0});
+  }
+
+  // Automatically identify '?' as the one non-empty cell that fits the five icon templates worst.
+  // Disconnected hook+dot structure gives an additional strong signal.
+  if(target===null&&rawItems.length){
+    const shapeScores=rawItems.map(x=>x.bestScore).sort((a,b)=>a-b);
+    const median=shapeScores[(shapeScores.length/2)|0]||0;
+    let qBest=null;
+    for(const it of rawItems){
+      const mismatch=Math.max(0,median-it.bestScore);
+      const disconnected=Math.min(.30,it.sym.secondRatio||0);
+      const neutral=(it.sym.meanSat||0)<.18?.08:0;
+      const qScore=mismatch*1.8+disconnected*1.2+neutral;
+      const plausible=(it.bestScore<median-.08) &&
+        (it.bestScore<.68 || (it.sym.secondRatio||0)>.035);
+      if(plausible&&(!qBest||qScore>qBest.qScore))qBest={...it,qScore};
+    }
+    if(qBest){
+      target=qBest.i;
+      cells[target].v=Q;cells[target].conf=1;
+    }
+  }
+
+  const items=[];
+  for(const it of rawItems){
+    if(it.i===target){
+      cells[it.i].v=Q;cells[it.i].conf=1;
+    }else{
+      items.push(it);
+    }
+  }
+
+  const assign=globallyConsistentAssignments(items);
+
+  for(const it of items){
+    const chosen=assign.get(it.i)||it.cands[0];
+    const alt=it.cands.find(x=>x.v!==chosen.v);
+    cells[it.i].v=chosen.v;
+    cells[it.i].conf=chosen.score-(alt?.score||0);
+  }
+
+  drawGrid();
+
+  if(target===null){
+    ans.textContent='题盘已识别，但未自动找到“？”';
+    note.textContent='请在右侧预览中点击问号所在格，再点下方“?”修正；其余图形已识别。';
+    return;
+  }
+
+  solve();
+  const lows=cells.filter(c=>c.v>=0&&(c.conf??1)<.075).length;
+  if(lows){
+    note.textContent += `；有 ${lows} 格形状识别较接近，已用红色“!”标出，可快速核对。`;
+  }else if(autoMode){
+    note.textContent += '；题盘和问号均为自动定位。';
+  }
+}
+document.getElementById('recognize').onclick=()=>autoLocateAndRecognize();
+
+document.getElementById('clear').onclick=()=>{
+  init();sel=null;showBox();
+  if(img){ans.textContent='已重置';note.textContent='点击“自动定位并求解”即可重新识别。'}
+};
+
+function solve(){
+  if(target===null){
+    ans.textContent='请先点“？”格';note.textContent='';return
+  }
+  let clues=[];
+  cells.forEach((c,i)=>{if(c.v>=0)clues.push([i/n|0,i%n,c.v])});
+  let tr=target/n|0,tc=target%n,poss=[];
+  for(let v=0;v<n;v++)if(can(n,clues,tr,tc,v))poss.push(v);
+
+  if(poss.length===1){
+    ans.innerHTML=html(poss[0]);
+    note.textContent='已得到唯一答案';
+  }else if(poss.length===0){
+    ans.textContent='识别结果有冲突';
+    note.textContent='点右侧可疑格子，用下面图形按钮修正识别错误';
+  }else{
+    ans.textContent='尚不能唯一确定';
+    note.textContent='候选：'+poss.map(v=>S[v][1]).join(' / ')+'。请核对自动识别。';
+  }
+}
+
+function can(n,cl,tr,tc,tv){
+  let g=Array.from({length:n},()=>Array(n).fill(-1));
+  let rm=Array(n).fill(0),cm=Array(n).fill(0),full=(1<<n)-1;
+
+  function put(r,c,v){
+    let b=1<<v;
+    if(rm[r]&b||cm[c]&b)return false;
+    g[r][c]=v;rm[r]|=b;cm[c]|=b;return true
+  }
+
+  for(let [r,c,v] of cl){
+    if(r===tr&&c===tc)continue;
+    if(!put(r,c,v))return false
+  }
+  if(!put(tr,tc,tv))return false;
+
+  function dfs(){
+    let br=-1,bc=-1,bm=0,best=99;
+    for(let r=0;r<n;r++)for(let c=0;c<n;c++)if(g[r][c]<0){
+      let m=full&~(rm[r]|cm[c]),cnt=0,z=m;
+      while(z){z&=z-1;cnt++}
+      if(!cnt)return false;
+      if(cnt<best){best=cnt;br=r;bc=c;bm=m}
+    }
+    if(br<0)return true;
+
+    for(let v=0;v<n;v++)if(bm&(1<<v)){
+      g[br][bc]=v;rm[br]|=1<<v;cm[bc]|=1<<v;
+      if(dfs())return true;
+      rm[br]^=1<<v;cm[bc]^=1<<v;g[br][bc]=-1
+    }
+    return false
+  }
+  return dfs()
+}
+init();
+</script>
+</body>
+</html>
